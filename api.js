@@ -1,11 +1,11 @@
 import axios from 'axios';
 
-// Inside your api.js
+// This matches the rewrite rule in your vercel.json
 const API_BASE_URL = "/api";
 
 const api = axios.create({
-    baseURL: BASE_URL,
-    timeout: 10000,
+  baseURL: API_BASE_URL,
+  timeout: 10000,
 });
 
 export const getWorkers = () => api.get('/workers').then(r => r.data);
