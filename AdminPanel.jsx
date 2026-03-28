@@ -1,0 +1,223 @@
+import { useEffect, useState } from 'react';
+import { getWorkers, getWorker, getAILenderNarrative } from './api';
+import { simulateScore } from './api';
+import ScoreGauge from './ScoreGauge';
+import RiskBadge from './RiskBadge';
+import AIPanel from './components/AIPanel';
+
+const workerColors = ['#14b8a6', '#10b981', '#3b82f6', '#8b5cf6', '#f59e0b'];
+
+export default function AdminPanel() {
+    const [workers, setWorkers] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [sortKey, setSortKey] = useState('score');
+    const [sortDir, setSortDir] = useState('desc');
+    const [filterBand, setFilterBand] = useState('All');
+    const [selectedWorkerId, setSelectedWorkerId] = useState(null);
+    const [selectedWorkerDetails, setSelectedWorkerDetails] = useState(null);
+
+    useEffect(() => {
+        getWorkers().then(w => { setWorkers(w); setLoading(false); }).catch(() => setLoading(false));
+    }, []);
+
+    const toggleSort = (key) => {
+        if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        else { setSortKey(key); setSortDir('desc'); }
+    };
+
+    const sorted = [...workers]
+        .filter(w => filterBand === 'All' || w.risk_band === filterBand)
+        .sort((a, b) => {
+            const aVal = a[sortKey] ?? 0;
+            const bVal = b[sortKey] ?? 0;
+            return sortDir === 'asc' ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
+        });
+
+    const SortIcon = ({ k }) => sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
+
+    if (loading) return <div className="loading-screen"><div className="spinner" /><p>Loading worker database...</p></div>;
+
+    const bands = ['All', 'Excellent', 'Good', 'Fair', 'High Risk'];
+
+    // Summary metrics
+    const avgScore = workers.length ? Math.round(workers.reduce((s, w) => s + w.score, 0) / workers.length) : 0;
+    const eligible = workers.filter(w => w.score >= 500).length;
+    const excellentCount = workers.filter(w => w.risk_band === 'Excellent').length;
+
+    return (
+        <div className="animate-in">
+            <div className="page-header">
+                <h1>Lender Admin Panel</h1>
+                <p>Compare and assess gig worker credit profiles for loan underwriting decisions</p>
+            </div>
+
+            {/* Summary metrics */}
+            <div className="stat-grid mb-5">
+                <div className="stat-card">
+                    <div className="stat-label">Total Workers</div>
+                    <div className="stat-value">{workers.length}</div>
+                    <div className="stat-sub">in database</div>
+                </div>
+                <div className="stat-card">
+                    <div className="stat-label">Average Score</div>
+                    <div className="stat-value accent">{avgScore}</div>
+                    <div className="stat-sub">portfolio avg</div>
+                </div>
+                <div className="stat-card">
+                    <div className="stat-label">Loan Eligible</div>
+                    <div className="stat-value">{eligible}</div>
+                    <div className="stat-sub positive">{Math.round(eligible / workers.length * 100)}% of portfolio</div>
+                </div>
+                <div className="stat-card">
+                    <div className="stat-label">Excellent Band</div>
+                    <div className="stat-value">{excellentCount}</div>
+                    <div className="stat-sub positive">Premium tier</div>
+                </div>
+            </div>
+
+            {/* Filter */}
+            <div className="flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
+                {bands.map(b => (
+                    <button
+                        key={b}
+                        className={`worker-chip ${filterBand === b ? 'active' : ''}`}
+                        onClick={() => setFilterBand(b)}
+                        style={{ cursor: 'pointer' }}
+                    >
+                        {b}
+                    </button>
+                ))}
+            </div>
+
+            {/* Table */}
+            <div className="card" style={{ overflow: 'auto' }}>
+                <div className="card-header">
+                    <span className="card-title">Worker Comparison Table</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sorted.length} workers</span>
+                </div>
+                <table className="data-table">
+                    <thead>
+                        <tr>
+                            <th>Worker</th>
+                            <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('score')}>Score<SortIcon k="score" /></th>
+                            <th>Risk Band</th>
+                            <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('avg_monthly_income')}>Avg Income<SortIcon k="avg_monthly_income" /></th>
+                            <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('rating')}>Rating<SortIcon k="rating" /></th>
+                            <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('months_active')}>Tenure<SortIcon k="months_active" /></th>
+                            <th>Platform</th>
+                            <th>Decision</th>
+                            <th>Dossier</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {sorted.map((w, i) => (
+                            <tr key={w.id}>
+                                <td>
+                                    <div className="flex items-center gap-2">
+                                        <div className="avatar" style={{ width: 32, height: 32, fontSize: 10, background: `linear-gradient(135deg, ${workerColors[i % 5]}88, ${workerColors[(i + 1) % 5]}88)` }}>{w.avatar}</div>
+                                        <div>
+                                            <div style={{ fontWeight: 600, fontSize: 13 }}>{w.name}</div>
+                                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{w.job_type} · {w.city}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span style={{ fontSize: 18, fontWeight: 800, color: w.risk_color }}>{w.score}</span>
+                                </td>
+                                <td><RiskBadge band={w.risk_band} /></td>
+                                <td style={{ fontWeight: 500 }}>₹{(w.avg_monthly_income || 0).toLocaleString()}</td>
+                                <td>
+                                    <div className="flex items-center gap-1">
+                                        <span style={{ color: '#f59e0b' }}>★</span>
+                                        <span>{w.rating}</span>
+                                    </div>
+                                </td>
+                                <td>{w.months_active} mo</td>
+                                <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{w.platform}</td>
+                                <td>
+                                    {w.score >= 800 ? (
+                                        <span style={{ color: '#10b981', fontWeight: 600, fontSize: 12 }}>✓ Pre-approved</span>
+                                    ) : w.score >= 650 ? (
+                                        <span style={{ color: '#14b8a6', fontWeight: 600, fontSize: 12 }}>✓ Eligible</span>
+                                    ) : w.score >= 500 ? (
+                                        <span style={{ color: '#f59e0b', fontWeight: 600, fontSize: 12 }}>⚠ Review</span>
+                                    ) : (
+                                        <span style={{ color: '#ef4444', fontWeight: 600, fontSize: 12 }}>✗ Declined</span>
+                                    )}
+                                </td>
+                                <td>
+                                    <button 
+                                        className="btn btn-ghost btn-sm" 
+                                        style={{ fontSize: 11, padding: '4px 8px', border: '1px solid var(--border)' }}
+                                        onClick={() => {
+                                            setSelectedWorkerDetails(null);
+                                            setSelectedWorkerId(w.id);
+                                            getWorker(w.id).then(details => {
+                                                setSelectedWorkerDetails(details.profile);
+                                                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                                            });
+                                        }}
+                                    >
+                                        📑 Dossier
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* Score distribution bars */}
+            <div className="card" style={{ marginTop: 20 }}>
+                <div className="card-header">
+                    <span className="card-title">Portfolio Risk Distribution</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {[['Excellent', '800–1000', '#10b981'], ['Good', '650–799', '#14b8a6'], ['Fair', '500–649', '#f59e0b'], ['High Risk', '<500', '#ef4444']].map(([band, range, color]) => {
+                        const count = workers.filter(w => w.risk_band === band).length;
+                        const pct = workers.length ? Math.round(count / workers.length * 100) : 0;
+                        return (
+                            <div key={band}>
+                                <div className="progress-bar-header">
+                                    <div className="flex items-center gap-2">
+                                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
+                                        <span className="progress-bar-label">{band} ({range})</span>
+                                    </div>
+                                    <span style={{ fontSize: 13, fontWeight: 600, color }}>{count} workers ({pct}%)</span>
+                                </div>
+                                <div className="progress-bar-track">
+                                    <div className="progress-bar-fill" style={{ width: `${pct}%`, background: color }} />
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* AI Dossier Section */}
+            {selectedWorkerId && (
+                <div className="card" style={{ marginTop: 20 }}>
+                    <div className="card-header">
+                        <span className="card-title">AI Lender Dossier</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                            {workers.find(w => w.id === selectedWorkerId)?.name}
+                        </span>
+                    </div>
+                    {selectedWorkerDetails ? (
+                        <div style={{ marginTop: 10 }}>
+                            <AIPanel 
+                                title="Underwriter Narrative" 
+                                icon="🏦" 
+                                fetchFn={getAILenderNarrative} 
+                                args={[selectedWorkerDetails]} 
+                                trigger={selectedWorkerId} 
+                            />
+                        </div>
+                    ) : (
+                        <div className="loading-screen" style={{ minHeight: 200 }}><div className="spinner" /></div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
